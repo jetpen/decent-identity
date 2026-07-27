@@ -21,6 +21,15 @@ package-dir = { "" = "src" }
 where = ["src"]
 include = ["decent_identity*"]
 
+[project.scripts]
+# CLI entry point for identity lookup service
+# (contract in #5)
+# dec-id CLI: decent-identity
+#
+# Note: runtime deps for decent-registry/libp2p are expected to be present
+# in the development environment.
+decent-identity = "decent_identity.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest",

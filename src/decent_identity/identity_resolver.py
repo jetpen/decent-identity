@@ -64,3 +64,58 @@ async def resolve_identity_record(
             owner_public_key_hex=owner_public_key_hex,
             seq=int(res["seq"]),
         )
+
+
+def _derive_owner_name_hex_from_identifier(identifier: str) -> str:
+    # Raw UTF-8 bytes; no normalization.
+    if identifier is None or identifier == "":
+        raise ValueError("identifier must be a non-empty string")
+    return identifier.encode("utf-8").hex()
+
+
+async def put_identity(
+    *,
+    identifier: str,
+    owner_privkey_pem_path: str,
+    seq: int,
+    host: str,
+    port: int,
+    bootstrap: list[str],
+) -> None:
+    """Store a signed identity binding for `identifier`.
+
+    Delegates verification and "latest" selection to `decent-registry`.
+    """
+    owner_name_hex = _derive_owner_name_hex_from_identifier(identifier)
+
+    from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+    from decent_registry.registry_service import RegistryService
+
+    async with Libp2pKadDHT(listen=f"/ip4/{host}/tcp/{port}") as dht:
+        for seed in bootstrap:
+            await dht.bootstrap(seed)
+        svc = RegistryService(dht=dht)
+        await svc.put_identity(
+            owner_name_hex=owner_name_hex,
+            owner_privkey_pem_path=owner_privkey_pem_path,
+            seq=int(seq),
+        )
+
+
+async def get_identity_record(
+    *,
+    identifier: str,
+    host: str,
+    port: int,
+    bootstrap: list[str],
+    quorum: int = 0,
+) -> IdentityResolutionResult | None:
+    """Resolve the latest verified identity binding for `identifier`."""
+    owner_name_hex = _derive_owner_name_hex_from_identifier(identifier)
+    return await resolve_identity_record(
+        owner_name_hex=owner_name_hex,
+        host=host,
+        port=port,
+        bootstrap=bootstrap,
+        quorum=quorum,
+    )
