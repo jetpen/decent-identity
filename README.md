@@ -6,6 +6,69 @@ Given an identifier string (full name, email like `mailto:<addr>`, telephone lik
 
 `put` stores a signed binding (identifier + Ed25519 public key + proof-of-possession signature). `get` returns the latest verified public key for the identifier.
 
+## Running the Server
+
+`decent-identity` is a client that delegates all networking/DHT/storage to a running `decent-registry` **node**.
+
+The `decent-registry node` process prints an identify-style bootstrap multiaddr in the form:
+
+`[BOOTSTRAP] /ip4/<host>/tcp/<port>/p2p/<PEERID>`
+
+Copy that value (everything after `[BOOTSTRAP]`) and use it as the client `--bootstrap` argument.
+
+### Minimal two-terminal setup (single node)
+
+Terminal 1 (start the node; keep running):
+
+```bash
+mkdir -p ~/.decent
+cat > ~/.decent/registry.yaml <<'YAML'
+network:
+  host: 127.0.0.1
+  port: 9000
+  bootstrap: []
+
+datastore:
+  # Stored locally as LMDB durable cache.
+  path: ~/.decent/registry
+
+logging:
+  verbosity: 1
+YAML
+
+decent-registry -v node --config ~/.decent/registry.yaml
+```
+
+Terminal 2 (run the client `put`/`get`):
+
+```bash
+# Replace with the full bootstrap multiaddr copied from Terminal 1
+NODE_BOOTSTRAP="/ip4/127.0.0.1/tcp/9000/p2p/<PEERID>"
+
+# Generate an owner private key (Ed25519, PKCS#8 PEM)
+decent-registry keygen --output ~/.decent/owner_privkey.pem
+
+# put (exit 0 on success; prints "1")
+decent-identity put \
+  --identifier "Ben" \
+  --owner-privkey ~/.decent/owner_privkey.pem \
+  --seq 1 \
+  --host 127.0.0.1 \
+  --port 9100 \
+  --bootstrap "$NODE_BOOTSTRAP"
+
+# get (exit 0 on success; JSON output; or "not found" with exit code 1)
+decent-identity get \
+  --identifier "Ben" \
+  --host 127.0.0.1 \
+  --port 9101 \
+  --bootstrap "$NODE_BOOTSTRAP"
+```
+
+For full server/node setup details and network scaling options, see:
+- `decent-registry/docs/single-node-server-setup.md`
+- `decent-registry/docs/multi-node-cluster-setup.md`
+
 ## CLI Usage
 
 The `decent-identity` CLI provides `put` and `get` subcommands for exact-match identity lookups.
@@ -60,5 +123,13 @@ decent-identity get \
   - `source .venv/bin/activate`
   - `pip install -U pip`
   - `pip install -e ".[dev]"`
+
+### Running tests
+
+- Ensure you are in the project root directory.
+- Activate your virtual environment: `source .venv/bin/activate`.
+- Run tests: `pytest -q`.
+
+This command should pass all tests.
 
 Note: `pyproject.toml` declares a local-path dependency on `decent-registry`. This repo may reuse `decent-registry` verification primitives, but the lookup service + storage + API shape are defined by the wayfinder map.
