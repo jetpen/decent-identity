@@ -1,4 +1,4 @@
-# Decent Identity
+# Decentralized Identity
 
 Exact-match identity lookup service.
 
