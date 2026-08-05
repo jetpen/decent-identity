@@ -79,6 +79,7 @@ async def test_resolve_identity_record_parses_success(monkeypatch):
     assert res.owner_name_hex == "11" * 16
     assert res.owner_public_key_hex == "aa"
     assert res.seq == 7
+    assert res.authorization is None
 
 
 @pytest.mark.trio
@@ -573,3 +574,106 @@ async def test_put_identity_rejects_two_finalized_envelope_sources(tmp_path):
             port=0,
             bootstrap=[],
         )
+
+
+@pytest.mark.trio
+async def test_resolve_identity_record_maps_multisig_authorization(monkeypatch):
+    import sys
+    import types
+
+    import decent_identity.identity_resolver as m
+
+    owner_name_hex = "11" * 16
+    owner_public_key = bytes.fromhex("aa" * 32)
+    authorization_dict = {
+        "version": 1,
+        "operation": 1,
+        "epoch": 1,
+        "threshold": 2,
+        "signer_set": [
+            {"signer_id": "alice", "public_key": "aa" * 32},
+            {"signer_id": "bob", "public_key": "bb" * 32},
+            {"signer_id": "carol", "public_key": "cc" * 32},
+        ],
+        "predecessor_state_hash": "00" * 32,
+        "state_hash": "dd" * 32,
+    }
+
+    class FakeDHT:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def bootstrap(self, seed: str):
+            return None
+
+    class FakeLibp2pKadDHT:
+        def __init__(self, listen: str):
+            self.listen = listen
+
+        async def __aenter__(self):
+            return FakeDHT()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeAuthorization:
+        def to_dict(self):
+            return authorization_dict
+
+    class FakeIdentityRecordResult:
+        def __init__(self):
+            self.owner_name_hex = owner_name_hex
+            self.owner_public_key = owner_public_key
+            self.seq = 7
+            self.authorization = FakeAuthorization()
+
+    decent_registry_pkg = types.ModuleType("decent_registry")
+    decent_registry_pkg.__path__ = []
+    dht_pkg = types.ModuleType("decent_registry.dht")
+    dht_pkg.__path__ = []
+    libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
+
+    class FakeRegistryService:
+        def __init__(self, dht):
+            self.dht = dht
+
+        async def get_identity(self, *, owner_name_hex: str, quorum: int = 0):
+            assert owner_name_hex == "11" * 16
+            assert quorum == 2
+            return FakeIdentityRecordResult()
+
+    reg_service_mod = types.ModuleType("decent_registry.registry_service")
+    reg_service_mod.RegistryService = FakeRegistryService
+
+    monkeypatch.setitem(sys.modules, "decent_registry", decent_registry_pkg)
+    monkeypatch.setitem(sys.modules, "decent_registry.dht", dht_pkg)
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.dht.libp2p_dht",
+        libp2p_dht_mod,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.registry_service",
+        reg_service_mod,
+    )
+
+    result = await m.resolve_identity_record(
+        owner_name_hex=owner_name_hex,
+        host="127.0.0.1",
+        port=0,
+        bootstrap=[],
+        quorum=2,
+    )
+
+    assert result is not None
+    assert result.owner_name_hex == owner_name_hex
+    assert result.owner_public_key_hex == owner_public_key.hex()
+    assert result.seq == 7
+    assert result.authorization is not None
+    assert isinstance(result.authorization, m.AuthorizationMetadata)
+    assert result.authorization.to_dict() == authorization_dict
