@@ -126,6 +126,15 @@ def test_get_multisig_result_includes_authorization(monkeypatch, capsys):
     assert exc.value.code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["authorization"] == authorization.to_dict()
+    assert set(payload["authorization"]) == {
+        "version",
+        "operation",
+        "epoch",
+        "threshold",
+        "signer_set",
+        "predecessor_state_hash",
+        "state_hash",
+    }
     assert payload["authorization"]["threshold"] == 2
     assert payload["authorization"]["signer_set"][1]["signer_id"] == "bob"
 
@@ -150,11 +159,60 @@ def test_get_legacy_result_omits_authorization(monkeypatch, capsys):
     assert "authorization" not in payload
 
 
+def test_put_legacy_delegates_and_prints_success(monkeypatch, capsys):
+    import decent_identity.cli as c
+
+    calls: dict[str, object] = {}
+
+    async def fake_put_identity(**kwargs):
+        calls.update(kwargs)
+
+    monkeypatch.setattr(c, "put_identity", fake_put_identity)
+
+    with pytest.raises(SystemExit) as exc:
+        c.main(
+            [
+                "put",
+                "--identifier",
+                "Ben",
+                "--owner-privkey",
+                "owner.pem",
+                "--seq",
+                "3",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ]
+        )
+
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == "1"
+    assert calls == {
+        "identifier": "Ben",
+        "owner_privkey_pem_path": "owner.pem",
+        "seq": 3,
+        "host": "127.0.0.1",
+        "port": 0,
+        "bootstrap": [],
+    }
+
+
 def test_put_help_documents_finalized_envelope(capsys):
     import decent_identity.cli as c
 
     with pytest.raises(SystemExit) as exc:
         c.main(["put", "--help"])
+
+    assert exc.value.code == 0
+    assert "--finalized-envelope" in capsys.readouterr().out
+
+
+def test_root_help_documents_finalized_envelope(capsys):
+    import decent_identity.cli as c
+
+    with pytest.raises(SystemExit) as exc:
+        c.main(["--help"])
 
     assert exc.value.code == 0
     assert "--finalized-envelope" in capsys.readouterr().out

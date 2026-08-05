@@ -52,7 +52,13 @@ def _identity_result_to_dict(result: Any) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="decent-identity")
+    parser = argparse.ArgumentParser(
+        prog="decent-identity",
+        description=(
+            "Resolve identity records or publish updates. "
+            "Use --finalized-envelope PATH for finalized multisignature put."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     # put
