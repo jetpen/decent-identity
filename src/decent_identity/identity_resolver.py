@@ -22,8 +22,11 @@ class SignerMetadata:
 
 @dataclass(frozen=True, slots=True)
 class AuthorizationMetadata:
-    """Validated v1 authorization metadata with a registry-compatible mapping shape."""
+    """Public v1 authorization metadata with a registry-compatible mapping shape.
 
+    Registry-side protocol validation occurs before this adapter maps the result;
+    this model validates the stable Python representation exposed to callers.
+    """
     version: int
     operation: int
     epoch: int
