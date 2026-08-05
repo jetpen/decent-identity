@@ -130,3 +130,66 @@ def test_cli_put_value_error_exit2(monkeypatch, capsys):
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "error:" in err
+
+
+
+def test_cli_put_seq_monotonic_value_error_exit2(monkeypatch, capsys):
+    import decent_identity.cli as c
+
+    async def fake_put_identity(**kwargs):
+        raise ValueError("seq monotonicity violation")
+
+    monkeypatch.setattr(c, "put_identity", fake_put_identity)
+
+    with pytest.raises(SystemExit) as exc:
+        c.main(
+            [
+                "put",
+                "--identifier",
+                "Ben",
+                "--owner-privkey",
+                "priv.pem",
+                "--seq",
+                "0",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ]
+        )
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "seq monotonicity" in err
+
+
+
+def test_cli_put_runtime_error_exit1(monkeypatch, capsys):
+    import decent_identity.cli as c
+
+    async def fake_put_identity(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(c, "put_identity", fake_put_identity)
+
+    with pytest.raises(SystemExit) as exc:
+        c.main(
+            [
+                "put",
+                "--identifier",
+                "Ben",
+                "--owner-privkey",
+                "priv.pem",
+                "--seq",
+                "0",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ]
+        )
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "put failed" in err
