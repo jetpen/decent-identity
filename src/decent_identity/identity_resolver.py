@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 
@@ -73,19 +74,71 @@ def _derive_owner_name_hex_from_identifier(identifier: str) -> str:
     return identifier.encode("utf-8").hex()
 
 
+def _read_finalized_envelope(
+    *,
+    finalized_envelope_path: str | Path | None,
+    finalized_envelope_cbor: bytes | bytearray | None,
+) -> bytes | None:
+    if finalized_envelope_path is not None and finalized_envelope_cbor is not None:
+        raise ValueError(
+            "provide exactly one of finalized_envelope_path or finalized_envelope_cbor"
+        )
+
+    if finalized_envelope_path is not None:
+        try:
+            return Path(finalized_envelope_path).read_bytes()
+        except (OSError, TypeError):
+            raise ValueError("cannot read finalized identity envelope file") from None
+
+    if finalized_envelope_cbor is not None:
+        if not isinstance(finalized_envelope_cbor, (bytes, bytearray)):
+            raise ValueError("finalized_envelope_cbor must be bytes")
+        return bytes(finalized_envelope_cbor)
+
+    return None
+
+
 async def put_identity(
     *,
     identifier: str,
-    owner_privkey_pem_path: str,
-    seq: int,
+    owner_privkey_pem_path: str | None = None,
+    seq: int | None = None,
     host: str,
     port: int,
     bootstrap: list[str],
+    finalized_envelope_path: str | Path | None = None,
+    finalized_envelope_cbor: bytes | bytearray | None = None,
 ) -> None:
-    """Store a signed identity binding for `identifier`.
+    """Store a legacy or finalized identity binding for `identifier`.
 
-    Delegates verification and "latest" selection to `decent-registry`.
+    Legacy mode delegates signing to ``decent-registry`` using
+    ``owner_privkey_pem_path`` and ``seq``. Finalized mode accepts the exact
+    versioned SignedEnvelope bytes and delegates envelope validation and
+    publication without private-key material.
     """
+    finalized_mode = (
+        finalized_envelope_path is not None or finalized_envelope_cbor is not None
+    )
+    if finalized_mode and (
+        owner_privkey_pem_path is not None or seq is not None
+    ):
+        raise ValueError(
+            "finalized envelope cannot be combined with legacy identity signing arguments"
+        )
+
+    finalized_envelope = _read_finalized_envelope(
+        finalized_envelope_path=finalized_envelope_path,
+        finalized_envelope_cbor=finalized_envelope_cbor,
+    )
+
+    if finalized_envelope is None:
+        if owner_privkey_pem_path is None or seq is None:
+            raise ValueError(
+                "legacy identity put requires owner_privkey_pem_path and seq"
+            )
+        assert owner_privkey_pem_path is not None
+        assert seq is not None
+
     owner_name_hex = _derive_owner_name_hex_from_identifier(identifier)
 
     from decent_registry.dht.libp2p_dht import Libp2pKadDHT
@@ -95,11 +148,17 @@ async def put_identity(
         for seed in bootstrap:
             await dht.bootstrap(seed)
         svc = RegistryService(dht=dht)
-        await svc.put_identity(
-            owner_name_hex=owner_name_hex,
-            owner_privkey_pem_path=owner_privkey_pem_path,
-            seq=int(seq),
-        )
+        if finalized_envelope is not None:
+            await svc.put_identity(
+                owner_name_hex=owner_name_hex,
+                envelope_cbor=finalized_envelope,
+            )
+        else:
+            await svc.put_identity(
+                owner_name_hex=owner_name_hex,
+                owner_privkey_pem_path=owner_privkey_pem_path,
+                seq=int(seq),
+            )
 
 
 async def get_identity_record(
