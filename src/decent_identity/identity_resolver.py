@@ -116,17 +116,22 @@ async def put_identity(
     versioned SignedEnvelope bytes and delegates envelope validation and
     publication without private-key material.
     """
+    finalized_mode = (
+        finalized_envelope_path is not None or finalized_envelope_cbor is not None
+    )
+    if finalized_mode and (
+        owner_privkey_pem_path is not None or seq is not None
+    ):
+        raise ValueError(
+            "finalized envelope cannot be combined with legacy identity signing arguments"
+        )
+
     finalized_envelope = _read_finalized_envelope(
         finalized_envelope_path=finalized_envelope_path,
         finalized_envelope_cbor=finalized_envelope_cbor,
     )
 
-    if finalized_envelope is not None:
-        if owner_privkey_pem_path is not None or seq is not None:
-            raise ValueError(
-                "finalized envelope cannot be combined with legacy identity signing arguments"
-            )
-    else:
+    if finalized_envelope is None:
         if owner_privkey_pem_path is None or seq is None:
             raise ValueError(
                 "legacy identity put requires owner_privkey_pem_path and seq"

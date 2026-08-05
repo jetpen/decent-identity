@@ -415,6 +415,7 @@ async def test_put_identity_finalized_envelope_passes_exact_bytes_without_privat
 ):
     import sys
     import types
+    from pathlib import Path
 
     import decent_identity.identity_resolver as m
 
@@ -424,6 +425,14 @@ async def test_put_identity_finalized_envelope_passes_exact_bytes_without_privat
     envelope_path.write_bytes(envelope_bytes)
     put_calls: dict[str, object] = {}
     dht_bootstrap_seeds: list[str] = []
+    envelope_reads: list[Path] = []
+    original_read_bytes = Path.read_bytes
+
+    def tracked_read_bytes(path: Path) -> bytes:
+        envelope_reads.append(path)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", tracked_read_bytes)
 
     class FakeDHT:
         async def __aenter__(self):
@@ -489,14 +498,26 @@ async def test_put_identity_finalized_envelope_passes_exact_bytes_without_privat
         "envelope_cbor": envelope_bytes,
     }
     assert dht_bootstrap_seeds == ["/ip4/127.0.0.1/tcp/0/p2p/peer"]
+    assert envelope_reads == [envelope_path]
 
 
 @pytest.mark.trio
-async def test_put_identity_rejects_mixed_finalized_and_legacy_arguments(tmp_path):
+async def test_put_identity_rejects_mixed_finalized_and_legacy_arguments(
+    monkeypatch, tmp_path
+):
+    from pathlib import Path
+
     import decent_identity.identity_resolver as m
 
-    envelope_path = tmp_path / "identity.signed-envelope.cbor"
-    envelope_path.write_bytes(b"finalized-envelope")
+    envelope_reads: list[Path] = []
+    original_read_bytes = Path.read_bytes
+
+    def tracked_read_bytes(path: Path) -> bytes:
+        envelope_reads.append(path)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", tracked_read_bytes)
+    envelope_path = tmp_path / "missing.signed-envelope.cbor"
 
     with pytest.raises(
         ValueError,
@@ -511,6 +532,8 @@ async def test_put_identity_rejects_mixed_finalized_and_legacy_arguments(tmp_pat
             port=0,
             bootstrap=[],
         )
+
+    assert envelope_reads == []
 
 
 @pytest.mark.trio
