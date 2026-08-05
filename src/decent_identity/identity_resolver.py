@@ -1,8 +1,112 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+
+@dataclass(frozen=True, slots=True)
+class SignerMetadata:
+    """Stable public representation of one authorized signer."""
+
+    signer_id: str
+    public_key_hex: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "signer_id": self.signer_id,
+            "public_key": self.public_key_hex,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationMetadata:
+    """Validated v1 authorization metadata with a registry-compatible mapping shape."""
+
+    version: int
+    operation: int
+    epoch: int
+    threshold: int
+    signer_set: tuple[SignerMetadata, ...]
+    predecessor_state_hash: str
+    state_hash: str
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AuthorizationMetadata":
+        signer_set_value = value.get("signer_set")
+        if not isinstance(signer_set_value, (list, tuple)):
+            raise ValueError("identity authorization signer_set must be a sequence")
+
+        signer_set: list[SignerMetadata] = []
+        for entry in signer_set_value:
+            if not isinstance(entry, Mapping):
+                raise ValueError("identity authorization signer entry must be a mapping")
+            signer_id = entry.get("signer_id")
+            public_key_hex = entry.get("public_key")
+            if not isinstance(signer_id, str) or not isinstance(public_key_hex, str):
+                raise ValueError("identity authorization signer fields must be strings")
+            signer_set.append(
+                SignerMetadata(
+                    signer_id=signer_id,
+                    public_key_hex=public_key_hex,
+                )
+            )
+
+        integer_fields = ("version", "operation", "epoch", "threshold")
+        integers: dict[str, int] = {}
+        for field_name in integer_fields:
+            field_value = value.get(field_name)
+            if isinstance(field_value, bool) or not isinstance(field_value, int):
+                raise ValueError(
+                    f"identity authorization {field_name} must be an integer"
+                )
+            integers[field_name] = field_value
+
+        predecessor_state_hash = value.get("predecessor_state_hash")
+        state_hash = value.get("state_hash")
+        if not isinstance(predecessor_state_hash, str) or not isinstance(
+            state_hash, str
+        ):
+            raise ValueError("identity authorization state hashes must be strings")
+
+        return cls(
+            version=integers["version"],
+            operation=integers["operation"],
+            epoch=integers["epoch"],
+            threshold=integers["threshold"],
+            signer_set=tuple(signer_set),
+            predecessor_state_hash=predecessor_state_hash,
+            state_hash=state_hash,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "operation": self.operation,
+            "epoch": self.epoch,
+            "threshold": self.threshold,
+            "signer_set": [entry.to_dict() for entry in self.signer_set],
+            "predecessor_state_hash": self.predecessor_state_hash,
+            "state_hash": self.state_hash,
+        }
+
+
+def _authorization_from_result(result: Any) -> AuthorizationMetadata | None:
+    if isinstance(result, Mapping):
+        raw_authorization = result.get("authorization")
+    else:
+        raw_authorization = getattr(result, "authorization", None)
+
+    if raw_authorization is None:
+        return None
+
+    to_dict = getattr(raw_authorization, "to_dict", None)
+    if callable(to_dict):
+        raw_authorization = to_dict()
+    if not isinstance(raw_authorization, Mapping):
+        raise ValueError("identity authorization metadata must be a mapping")
+    return AuthorizationMetadata.from_mapping(raw_authorization)
 
 
 @dataclass(frozen=True, slots=True)
@@ -10,6 +114,7 @@ class IdentityResolutionResult:
     owner_name_hex: str
     owner_public_key_hex: str
     seq: int
+    authorization: AuthorizationMetadata | None = None
 
 
 async def resolve_identity_record(
@@ -45,15 +150,22 @@ async def resolve_identity_record(
         if res is None:
             return None
 
-        # `decent_registry.registry_service.RegistryService.get_identity()`
-        # returns a plain dict with keys: owner_name, owner_public_key, seq.
-        owner_name_raw = res["owner_name"]
-        if isinstance(owner_name_raw, (bytes, bytearray)):
-            owner_name_hex = owner_name_raw.hex()
+        if isinstance(res, Mapping):
+            owner_name_raw = res["owner_name"]
+            owner_public_key_raw = res["owner_public_key"]
+            seq_raw = res["seq"]
         else:
-            owner_name_hex = str(owner_name_raw)
+            owner_name_raw = getattr(res, "owner_name_hex", None)
+            if owner_name_raw is None:
+                owner_name_raw = getattr(res, "owner_name")
+            owner_public_key_raw = getattr(res, "owner_public_key")
+            seq_raw = getattr(res, "seq")
 
-        owner_public_key_raw = res["owner_public_key"]
+        owner_name_hex = (
+            owner_name_raw.hex()
+            if isinstance(owner_name_raw, (bytes, bytearray))
+            else str(owner_name_raw)
+        )
         owner_public_key_hex = (
             owner_public_key_raw.hex()
             if isinstance(owner_public_key_raw, (bytes, bytearray))
@@ -63,7 +175,8 @@ async def resolve_identity_record(
         return IdentityResolutionResult(
             owner_name_hex=owner_name_hex,
             owner_public_key_hex=owner_public_key_hex,
-            seq=int(res["seq"]),
+            seq=int(seq_raw),
+            authorization=_authorization_from_result(res),
         )
 
 
