@@ -8,6 +8,7 @@ from typing import Any
 import trio
 
 from .identity_resolver import (
+    IdentityHistoryUnavailable,
     IdentityResolutionResult,
     get_identity_record,
     put_identity,
@@ -140,6 +141,9 @@ def main(argv: list[str] | None = None) -> None:
             await put_identity(**put_kwargs)
             print(1)
             return 0
+        except IdentityHistoryUnavailable as e:
+            print(f"history unavailable: {e}", file=sys.stderr)
+            return 3
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
@@ -156,6 +160,9 @@ def main(argv: list[str] | None = None) -> None:
                 bootstrap=_parse_endpoints(args.bootstrap),
                 quorum=args.quorum,
             )
+        except IdentityHistoryUnavailable as e:
+            print(f"history unavailable: {e}", file=sys.stderr)
+            return 3
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2

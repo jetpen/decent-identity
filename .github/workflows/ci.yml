@@ -1,0 +1,45 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Identity
+        uses: actions/checkout@v4
+        with:
+          path: decent-identity
+      - name: Check out Registry dependency
+        uses: actions/checkout@v4
+        with:
+          repository: jetpen/decent-registry
+          ref: main
+          path: decent-registry
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Create virtual environment
+        run: uv venv "$GITHUB_WORKSPACE/.venv"
+      - name: Install Identity and Registry test dependencies
+        working-directory: ${{ github.workspace }}
+        run: uv pip install --python "$GITHUB_WORKSPACE/.venv/bin/python" -e './decent-identity[dev]' -e ./decent-registry
+      - name: Require Registry import
+        run: $GITHUB_WORKSPACE/.venv/bin/python -c "import decent_registry"
+      - name: Run Identity tests including Registry interop
+        working-directory: decent-identity
+        run: $GITHUB_WORKSPACE/.venv/bin/python -m pytest -q -rs
+      - name: Compile source and tests
+        working-directory: decent-identity
+        run: $GITHUB_WORKSPACE/.venv/bin/python -m compileall -q src tests
