@@ -23,6 +23,24 @@ def _get_args() -> list[str]:
     ]
 
 
+def test_get_history_unavailable_is_not_reported_as_not_found(monkeypatch, capsys):
+    import decent_identity.cli as c
+    from decent_identity.identity_resolver import IdentityHistoryUnavailable
+
+    async def fake_get_identity_record(**kwargs):
+        raise IdentityHistoryUnavailable("predecessor history is unavailable")
+
+    monkeypatch.setattr(c, "get_identity_record", fake_get_identity_record)
+
+    with pytest.raises(SystemExit) as exc:
+        c.main(_get_args())
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 3
+    assert "history unavailable" in captured.err.lower()
+    assert "not found" not in captured.out.lower()
+
+
 def test_put_finalized_envelope_delegates_without_legacy_material(monkeypatch, capsys):
     import decent_identity.cli as c
 
@@ -216,3 +234,32 @@ def test_root_help_documents_finalized_envelope(capsys):
 
     assert exc.value.code == 0
     assert "--finalized-envelope" in capsys.readouterr().out
+
+
+def test_put_history_unavailable_has_distinct_exit_code(monkeypatch, capsys):
+    import decent_identity.cli as c
+    from decent_identity.identity_resolver import IdentityHistoryUnavailable
+
+    async def fake_put_identity(**kwargs):
+        raise IdentityHistoryUnavailable("predecessor history is unavailable")
+
+    monkeypatch.setattr(c, "put_identity", fake_put_identity)
+    with pytest.raises(SystemExit) as exc:
+        c.main(
+            [
+                "put",
+                "--identifier",
+                "Ben",
+                "--finalized-envelope",
+                "identity.signed-envelope.cbor",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 3
+    assert "history unavailable" in captured.err.lower()
+    assert "put failed" not in captured.err.lower()

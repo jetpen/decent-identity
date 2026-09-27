@@ -89,6 +89,7 @@ decent-identity put \
 
 - Exit code `0` on success; prints `1`.
 - Argument/validation errors: exit code `2` (stderr prefixed with `error:`).
+- If a current post-genesis record is observed but required predecessor history is unavailable, exit code `3` (stderr prefixed with `history unavailable`); publication fails closed.
 - Other runtime failures: exit code `1` (stderr `put failed`).
 
 ### `get` — Resolve a signed identity record
@@ -107,6 +108,7 @@ decent-identity get \
   - `owner_public_key_hex`
   - `seq`
 - On not found (exit code `1`): prints `not found`.
+- If a current post-genesis record is observed but required predecessor history is unavailable (exit code `3`): prints `history unavailable` to stderr; the record is not treated as absent.
 
 ### Exit codes
 
@@ -115,6 +117,7 @@ decent-identity get \
 | 0    | Success |
 | 1    | Not found (for `get`) or runtime failure |
 | 2    | Argument/validation error |
+| 3    | Required Identity predecessor history is unavailable; reads and writes fail closed |
 
 ## Development
 
@@ -128,8 +131,7 @@ decent-identity get \
 
 - Ensure you are in the project root directory.
 - Activate your virtual environment: `source .venv/bin/activate`.
+- Install the sibling Registry checkout into the same environment: `pip install -e ../decent-registry`.
 - Run tests: `pytest -q`.
 
-This command should pass all tests.
-
-Note: `pyproject.toml` declares a local-path dependency on `decent-registry`. This repo may reuse `decent-registry` verification primitives, but the lookup service + storage + API shape are defined by the wayfinder map.
+The cross-repository history tests require `../decent-registry`; they intentionally fail collection if the Registry dependency is missing instead of silently skipping the interop coverage.

@@ -6,6 +6,8 @@ async def test_resolve_identity_record_parses_success(monkeypatch):
     # Unit test: avoid network by monkeypatching decent-registry calls.
     import decent_identity.identity_resolver as m
 
+    dht_modes: list[object] = []
+
     class FakeDHT:
         async def __aenter__(self):
             return self
@@ -17,8 +19,9 @@ async def test_resolve_identity_record_parses_success(monkeypatch):
             return None
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object):
             self.listen = listen
+            dht_modes.append(dht_mode)
 
         async def __aenter__(self):
             return FakeDHT()
@@ -36,6 +39,7 @@ async def test_resolve_identity_record_parses_success(monkeypatch):
     dht_pkg.__path__ = []
 
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -80,6 +84,7 @@ async def test_resolve_identity_record_parses_success(monkeypatch):
     assert res.owner_public_key_hex == "aa"
     assert res.seq == 7
     assert res.authorization is None
+    assert dht_modes == ["client"]
 
 
 @pytest.mark.trio
@@ -97,7 +102,7 @@ async def test_resolve_identity_record_not_found_returns_none(monkeypatch):
             return None
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -116,6 +121,7 @@ async def test_resolve_identity_record_not_found_returns_none(monkeypatch):
     dht_pkg.__path__ = []
 
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -153,6 +159,163 @@ async def test_resolve_identity_record_not_found_returns_none(monkeypatch):
 
 
 @pytest.mark.trio
+async def test_resolve_identity_record_surfaces_history_unavailable(monkeypatch):
+    import decent_identity.identity_resolver as m
+
+    class RegistryIdentityHistoryUnavailable(RuntimeError):
+        pass
+
+    class FakeDHT:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def bootstrap(self, seed: str):
+            return None
+
+    class FakeLibp2pKadDHT:
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
+            self.listen = listen
+
+        async def __aenter__(self):
+            return FakeDHT()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    import sys
+    import types
+
+    decent_registry_pkg = types.ModuleType("decent_registry")
+    decent_registry_pkg.__path__ = []
+    dht_pkg = types.ModuleType("decent_registry.dht")
+    dht_pkg.__path__ = []
+    libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
+    libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
+    exceptions_mod = types.ModuleType("decent_registry.exceptions")
+    exceptions_mod.IdentityHistoryUnavailable = RegistryIdentityHistoryUnavailable
+
+    class FakeRegistryService:
+        def __init__(self, dht):
+            self.dht = dht
+
+        async def get_identity(self, *, owner_name_hex: str, quorum: int = 0):
+            raise RegistryIdentityHistoryUnavailable(
+                "authenticated predecessor history unavailable"
+            )
+
+    reg_service_mod = types.ModuleType("decent_registry.registry_service")
+    reg_service_mod.RegistryService = FakeRegistryService
+
+    monkeypatch.setitem(sys.modules, "decent_registry", decent_registry_pkg)
+    monkeypatch.setitem(sys.modules, "decent_registry.dht", dht_pkg)
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.dht.libp2p_dht",
+        libp2p_dht_mod,
+    )
+    monkeypatch.setitem(sys.modules, "decent_registry.exceptions", exceptions_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.registry_service",
+        reg_service_mod,
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        await m.resolve_identity_record(
+            owner_name_hex="33" * 16,
+            host="127.0.0.1",
+            port=0,
+            bootstrap=[],
+        )
+
+    assert type(exc.value).__name__ == "IdentityHistoryUnavailable"
+    assert "history unavailable" in str(exc.value)
+
+
+@pytest.mark.trio
+async def test_put_identity_surfaces_history_unavailable(monkeypatch):
+    import decent_identity.identity_resolver as m
+
+    class RegistryIdentityHistoryUnavailable(RuntimeError):
+        pass
+
+    class FakeDHT:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def bootstrap(self, seed: str):
+            return None
+
+    class FakeLibp2pKadDHT:
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
+            self.listen = listen
+
+        async def __aenter__(self):
+            return FakeDHT()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    import sys
+    import types
+
+    decent_registry_pkg = types.ModuleType("decent_registry")
+    decent_registry_pkg.__path__ = []
+    dht_pkg = types.ModuleType("decent_registry.dht")
+    dht_pkg.__path__ = []
+    libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
+    libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
+    exceptions_mod = types.ModuleType("decent_registry.exceptions")
+    exceptions_mod.IdentityHistoryUnavailable = RegistryIdentityHistoryUnavailable
+
+    class FakeRegistryService:
+        def __init__(self, dht):
+            self.dht = dht
+
+        async def put_identity(self, **kwargs):
+            raise RegistryIdentityHistoryUnavailable(
+                "authenticated predecessor history unavailable"
+            )
+
+    reg_service_mod = types.ModuleType("decent_registry.registry_service")
+    reg_service_mod.RegistryService = FakeRegistryService
+
+    monkeypatch.setitem(sys.modules, "decent_registry", decent_registry_pkg)
+    monkeypatch.setitem(sys.modules, "decent_registry.dht", dht_pkg)
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.dht.libp2p_dht",
+        libp2p_dht_mod,
+    )
+    monkeypatch.setitem(sys.modules, "decent_registry.exceptions", exceptions_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "decent_registry.registry_service",
+        reg_service_mod,
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        await m.put_identity(
+            identifier="Ben",
+            host="127.0.0.1",
+            port=0,
+            bootstrap=[],
+            finalized_envelope_cbor=b"finalized-envelope",
+        )
+
+    assert type(exc.value).__name__ == "IdentityHistoryUnavailable"
+    assert "history unavailable" in str(exc.value)
+
+
+@pytest.mark.trio
 async def test_put_identity_derives_owner_name_hex_and_calls_registry(monkeypatch):
     import decent_identity.identity_resolver as m
 
@@ -172,7 +335,7 @@ async def test_put_identity_derives_owner_name_hex_and_calls_registry(monkeypatc
             dht_bootstrap_seeds.append(seed)
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -193,6 +356,7 @@ async def test_put_identity_derives_owner_name_hex_and_calls_registry(monkeypatc
     dht_pkg = types.ModuleType("decent_registry.dht")
     dht_pkg.__path__ = []
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -259,7 +423,7 @@ async def test_get_identity_record_derives_owner_name_hex_and_maps_result(monkey
             return None
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -278,6 +442,7 @@ async def test_get_identity_record_derives_owner_name_hex_and_maps_result(monkey
     dht_pkg = types.ModuleType("decent_registry.dht")
     dht_pkg.__path__ = []
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -345,7 +510,7 @@ async def test_get_identity_record_not_found_returns_none(monkeypatch):
             return None
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -362,6 +527,7 @@ async def test_get_identity_record_not_found_returns_none(monkeypatch):
     dht_pkg = types.ModuleType("decent_registry.dht")
     dht_pkg.__path__ = []
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -446,7 +612,7 @@ async def test_put_identity_finalized_envelope_passes_exact_bytes_without_privat
             dht_bootstrap_seeds.append(seed)
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -460,6 +626,7 @@ async def test_put_identity_finalized_envelope_passes_exact_bytes_without_privat
     dht_pkg = types.ModuleType("decent_registry.dht")
     dht_pkg.__path__ = []
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:
@@ -610,7 +777,7 @@ async def test_resolve_identity_record_maps_multisig_authorization(monkeypatch):
             return None
 
     class FakeLibp2pKadDHT:
-        def __init__(self, listen: str):
+        def __init__(self, listen: str, *, dht_mode: object = "client"):
             self.listen = listen
 
         async def __aenter__(self):
@@ -635,6 +802,7 @@ async def test_resolve_identity_record_maps_multisig_authorization(monkeypatch):
     dht_pkg = types.ModuleType("decent_registry.dht")
     dht_pkg.__path__ = []
     libp2p_dht_mod = types.ModuleType("decent_registry.dht.libp2p_dht")
+    libp2p_dht_mod.DHTMode = types.SimpleNamespace(CLIENT="client")
     libp2p_dht_mod.Libp2pKadDHT = FakeLibp2pKadDHT
 
     class FakeRegistryService:

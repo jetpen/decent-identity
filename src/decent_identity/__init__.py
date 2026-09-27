@@ -1,5 +1,6 @@
 from .identity_resolver import (
     AuthorizationMetadata,
+    IdentityHistoryUnavailable,
     IdentityResolutionResult,
     SignerMetadata,
     _derive_owner_name_hex_from_identifier,
@@ -10,10 +11,11 @@ from .identity_resolver import (
 
 __all__ = [
     "AuthorizationMetadata",
+    "IdentityHistoryUnavailable",
     "IdentityResolutionResult",
     "SignerMetadata",
-    "resolve_identity_record",
-    "put_identity",
-    "get_identity_record",
     "_derive_owner_name_hex_from_identifier",
+    "get_identity_record",
+    "put_identity",
+    "resolve_identity_record",
 ]

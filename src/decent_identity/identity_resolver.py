@@ -112,6 +112,10 @@ def _authorization_from_result(result: Any) -> AuthorizationMetadata | None:
     return AuthorizationMetadata.from_mapping(raw_authorization)
 
 
+class IdentityHistoryUnavailable(RuntimeError):
+    """A current Identity state was observed, but its predecessor history was unavailable."""
+
+
 @dataclass(frozen=True, slots=True)
 class IdentityResolutionResult:
     owner_name_hex: str
@@ -142,14 +146,25 @@ async def resolve_identity_record(
 
     # Import inside function so this repo can be imported without installing
     # the sibling `decent-registry` package.
-    from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+    from decent_registry.dht.libp2p_dht import DHTMode, Libp2pKadDHT
+    try:
+        from decent_registry.exceptions import (
+            IdentityHistoryUnavailable as RegistryIdentityHistoryUnavailable,
+        )
+    except ImportError:
+        RegistryIdentityHistoryUnavailable = ()
     from decent_registry.registry_service import RegistryService
 
-    async with Libp2pKadDHT(listen=f"/ip4/{host}/tcp/{port}") as dht:
+    async with Libp2pKadDHT(
+        listen=f"/ip4/{host}/tcp/{port}", dht_mode=DHTMode.CLIENT
+    ) as dht:
         for seed in bootstrap:
             await dht.bootstrap(seed)
         svc = RegistryService(dht=dht)
-        res = await svc.get_identity(owner_name_hex=owner_name_hex, quorum=quorum)
+        try:
+            res = await svc.get_identity(owner_name_hex=owner_name_hex, quorum=quorum)
+        except RegistryIdentityHistoryUnavailable as exc:
+            raise IdentityHistoryUnavailable(str(exc)) from exc
         if res is None:
             return None
 
@@ -257,24 +272,36 @@ async def put_identity(
 
     owner_name_hex = _derive_owner_name_hex_from_identifier(identifier)
 
-    from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+    from decent_registry.dht.libp2p_dht import DHTMode, Libp2pKadDHT
+    try:
+        from decent_registry.exceptions import (
+            IdentityHistoryUnavailable as RegistryIdentityHistoryUnavailable,
+        )
+    except ImportError:
+        RegistryIdentityHistoryUnavailable = ()
     from decent_registry.registry_service import RegistryService
 
-    async with Libp2pKadDHT(listen=f"/ip4/{host}/tcp/{port}") as dht:
+    async with Libp2pKadDHT(
+        listen=f"/ip4/{host}/tcp/{port}", dht_mode=DHTMode.CLIENT
+    ) as dht:
         for seed in bootstrap:
             await dht.bootstrap(seed)
         svc = RegistryService(dht=dht)
-        if finalized_envelope is not None:
-            await svc.put_identity(
-                owner_name_hex=owner_name_hex,
-                envelope_cbor=finalized_envelope,
-            )
-        else:
-            await svc.put_identity(
-                owner_name_hex=owner_name_hex,
-                owner_privkey_pem_path=owner_privkey_pem_path,
-                seq=int(seq),
-            )
+        try:
+            if finalized_envelope is not None:
+                await svc.put_identity(
+                    owner_name_hex=owner_name_hex,
+                    envelope_cbor=finalized_envelope,
+                )
+            else:
+                assert seq is not None
+                await svc.put_identity(
+                    owner_name_hex=owner_name_hex,
+                    owner_privkey_pem_path=owner_privkey_pem_path,
+                    seq=seq,
+                )
+        except RegistryIdentityHistoryUnavailable as exc:
+            raise IdentityHistoryUnavailable(str(exc)) from exc
 
 
 async def get_identity_record(
